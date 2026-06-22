@@ -7,12 +7,13 @@ class AppStore extends ChangeNotifier {
   List<Source> sources = [];
   List<Policy> policies = [];
   List<DumpItem> dumps = [];
+  List<Person> people = [];
 
   final _db = FirebaseFirestore.instance;
 
   // ── Init ──
   Future<void> init() async {
-    await Future.wait([_loadTasks(), _loadSources(), _loadPolicies(), _loadDumps()]);
+    await Future.wait([_loadTasks(), _loadSources(), _loadPolicies(), _loadDumps(), _loadPeople()]);
     if (sources.isEmpty) await _initDefaultSources();
     notifyListeners();
   }
@@ -35,6 +36,11 @@ class AppStore extends ChangeNotifier {
   Future<void> _loadDumps() async {
     final snap = await _db.collection('dumps').orderBy('createdAt').get();
     dumps = snap.docs.map((d) => DumpItem.fromJson({...d.data(), 'id': d.id})).toList();
+  }
+
+  Future<void> _loadPeople() async {
+    final snap = await _db.collection('people').orderBy('name').get();
+    people = snap.docs.map((d) => Person.fromJson({...d.data(), 'id': d.id})).toList();
   }
 
   Future<void> _initDefaultSources() async {
@@ -115,7 +121,6 @@ class AppStore extends ChangeNotifier {
   Future<void> deleteSource(String id) async {
     await _db.collection('sources').doc(id).delete();
     sources.removeWhere((x) => x.id == id);
-    // orphan children
     for (int i = 0; i < sources.length; i++) {
       if (sources[i].parentId == id) {
         final updated = Source(id: sources[i].id, name: sources[i].name, color: sources[i].color, parentId: '');
@@ -123,7 +128,6 @@ class AppStore extends ChangeNotifier {
         sources[i] = updated;
       }
     }
-    // clear source from tasks
     for (int i = 0; i < tasks.length; i++) {
       if (tasks[i].sourceId == id) {
         final updated = tasks[i].copyWith(sourceId: '');
@@ -169,6 +173,60 @@ class AppStore extends ChangeNotifier {
     return false;
   }
 
+  // ── People ──
+  Future<void> addPerson(Person p) async {
+    await _db.collection('people').doc(p.id).set(p.toJson()..remove('id'));
+    people.add(p);
+    people.sort((a, b) => a.name.compareTo(b.name));
+    notifyListeners();
+  }
+
+  Future<void> updatePerson(Person p) async {
+    await _db.collection('people').doc(p.id).update(p.toJson()..remove('id'));
+    final i = people.indexWhere((x) => x.id == p.id);
+    if (i >= 0) people[i] = p;
+    notifyListeners();
+  }
+
+  Person? personByName(String name) {
+    final normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    try {
+      return people.firstWhere((p) => p.name.trim().toLowerCase() == normalized);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> ensurePeopleByNames(List<String> names) async {
+    final uniqueNames = names.map((n) => n.trim()).where((n) => n.isNotEmpty).toSet();
+    for (final name in uniqueNames) {
+      if (personByName(name) == null) {
+        final p = Person(id: _uid(), name: name);
+        await _db.collection('people').doc(p.id).set(p.toJson()..remove('id'));
+        people.add(p);
+      }
+    }
+    people.sort((a, b) => a.name.compareTo(b.name));
+    notifyListeners();
+  }
+
+  Future<void> deletePerson(String id) async {
+    await _db.collection('people').doc(id).delete();
+    people.removeWhere((x) => x.id == id);
+    notifyListeners();
+  }
+
+  Person buildNewPerson() => Person(id: _uid(), name: '');
+
+  List<String> allPeopleNames() {
+    final fromPeople = people.map((p) => p.name).toSet();
+    for (final t in tasks) fromPeople.addAll(t.allPeople);
+    return fromPeople.toList()..sort();
+  }
+
+  List<String> allPeople() => allPeopleNames();
+
   // ── Policies ──
   Future<void> addPolicy(Policy p) async {
     await _db.collection('policies').doc(p.id).set(p.toJson()..remove('id'));
@@ -212,13 +270,6 @@ class AppStore extends ChangeNotifier {
     await batch.commit();
     dumps.clear();
     notifyListeners();
-  }
-
-  // ── People ──
-  List<String> allPeople() {
-    final s = <String>{};
-    for (final t in tasks) s.addAll(t.allPeople);
-    return s.toList()..sort();
   }
 
   // ── Stats ──

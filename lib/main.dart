@@ -182,7 +182,6 @@ class _SidebarState extends State<_Sidebar> {
     final store = widget.store;
     final activeTasks = store.activeTasks();
     final fuCount = store.followupCount();
-    final people = store.allPeople();
     final roots = store.rootSources();
 
     return Container(
@@ -224,24 +223,27 @@ class _SidebarState extends State<_Sidebar> {
                     child: Row(children: [
                       const Text('أشخاص', style: TextStyle(fontSize: 10, color: _muted, fontWeight: FontWeight.w600, letterSpacing: .5)),
                       const Spacer(),
+                      GestureDetector(
+                        onTap: () => showDialog(context: context, builder: (_) => _PersonFormDialog(person: store.buildNewPerson())),
+                        child: const Icon(Icons.add, size: 14, color: _muted),
+                      ),
+                      const SizedBox(width: 4),
                       Icon(_peopleOpen ? Icons.expand_less : Icons.expand_more, size: 14, color: _muted),
                     ]),
                   ),
                 ),
                 if (_peopleOpen)
-                  if (people.isEmpty)
+                  if (store.people.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       child: Text('لا يوجد أشخاص بعد', style: TextStyle(fontSize: 11.5, color: _muted)),
                     )
                   else
-                    ...people.map((p) => _NavTile(
-                          icon: Icons.person_outline,
-                          label: p,
-                          indent: true,
-                          active: widget.filtPerson == p && widget.current == NavSection.tasks,
-                          activeColor: _followup,
-                          onTap: () => widget.onNav(NavSection.tasks, person: p),
+                    ...store.people.map((p) => _PersonNavTile(
+                          person: p,
+                          active: widget.filtPerson == p.name && widget.current == NavSection.tasks,
+                          onTap: () => widget.onNav(NavSection.tasks, person: p.name),
+                          onEdit: () => showDialog(context: context, builder: (_) => _PersonFormDialog(person: p)),
                         )),
 
                 // Sources section
@@ -1322,7 +1324,7 @@ class TaskFormDialog extends StatefulWidget {
 
 class _TaskFormDialogState extends State<TaskFormDialog> {
   late TextEditingController _title, _desc, _assigned, _collabCtrl, _dateCtrl;
-  late String _priority, _timing, _sourceId;
+  late String _priority, _timing, _sourceId, _collabSelected;
   late List<String> _collabs;
   bool _isNew = false;
 
@@ -1340,12 +1342,13 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
     _priority = t.priority;
     _timing = t.timing;
     _sourceId = t.sourceId;
+    _collabSelected = '';
   }
 
   @override
   void dispose() { _title.dispose(); _desc.dispose(); _assigned.dispose(); _collabCtrl.dispose(); _dateCtrl.dispose(); super.dispose(); }
 
-  void _save(AppStore store) {
+  Future<void> _save(AppStore store) async {
     final title = _title.text.trim();
     if (title.isEmpty) return;
     final assignedTo = _assigned.text.trim();
@@ -1355,8 +1358,10 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       priority: _priority, timing: timing, sourceId: _sourceId,
       assignedTo: assignedTo, collaborators: _collabs, dueDate: _dateCtrl.text.trim(),
     );
-    if (_isNew) store.addTask(updated);
-    else store.updateTask(updated);
+    final namesToSave = [if (assignedTo.isNotEmpty) assignedTo, ..._collabs];
+    if (namesToSave.isNotEmpty) await store.ensurePeopleByNames(namesToSave);
+    if (_isNew) await store.addTask(updated);
+    else await store.updateTask(updated);
     Navigator.pop(context);
   }
 
@@ -1396,7 +1401,14 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _fLabel('المنفذ (فارغ = أنا)'),
-                TextField(controller: _assigned, textDirection: TextDirection.rtl, style: const TextStyle(fontSize: 13.5, color: _text), decoration: _inputDec('اسم الشخص المسؤول'), onChanged: (_) => setState(() {})),
+                _PersonPicker(
+                  people: store.people,
+                  selected: _assigned.text,
+                  hint: 'اختر منفذ المهمة أو اكتب اسماً جديداً',
+                  allowClear: true,
+                  onSelected: (name) => setState(() => _assigned.text = name),
+                  onSubmitted: (name) => setState(() => _assigned.text = name),
+                ),
               ])),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1409,14 +1421,28 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
             _fLabel('المتعاونون'),
             Row(children: [
               Expanded(
-                child: TextField(
-                  controller: _collabCtrl,
-                  textDirection: TextDirection.rtl,
-                  style: const TextStyle(fontSize: 13.5, color: _text),
-                  decoration: _inputDec('اكتب اسماً واضغط Enter'),
-                  onSubmitted: (v) {
-                    final n = v.trim();
-                    if (n.isNotEmpty && !_collabs.contains(n)) setState(() { _collabs.add(n); _collabCtrl.clear(); });
+                child: _PersonPicker(
+                  people: store.people,
+                  selected: _collabSelected,
+                  hint: 'اختر متعاوناً أو اكتب اسماً جديداً',
+                  allowClear: false,
+                  onSelected: (name) {
+                    final n = name.trim();
+                    if (n.isNotEmpty && !_collabs.contains(n)) {
+                      setState(() {
+                        _collabs.add(n);
+                        _collabSelected = '';
+                      });
+                    }
+                  },
+                  onSubmitted: (name) {
+                    final n = name.trim();
+                    if (n.isNotEmpty && !_collabs.contains(n)) {
+                      setState(() {
+                        _collabs.add(n);
+                        _collabSelected = '';
+                      });
+                    }
                   },
                 ),
               ),
@@ -1495,28 +1521,12 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       }));
 
   Widget _buildSourceDd(AppStore store) {
-    final items = <DropdownMenuItem<String>>[const DropdownMenuItem(value: '', child: Text('بدون جهة'))];
-    void addNode(String parentId, int depth) {
-      for (final s in store.childrenOf(parentId)) {
-        items.add(DropdownMenuItem(value: s.id, child: Text('${'  ' * depth}${s.name}')));
-        addNode(s.id, depth + 1);
-      }
-    }
-    for (final r in store.rootSources()) {
-      items.add(DropdownMenuItem(value: r.id, child: Text(r.name)));
-      addNode(r.id, 1);
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 2),
-      decoration: BoxDecoration(color: _surface2, border: Border.all(color: _border), borderRadius: BorderRadius.circular(8)),
-      child: DropdownButton<String>(
-        value: _sourceId,
-        isExpanded: true, isDense: true, underline: const SizedBox(),
-        dropdownColor: _surface2,
-        style: const TextStyle(fontSize: 13.5, color: _text, fontFamily: 'Arial'),
-        items: items,
-        onChanged: (v) => setState(() => _sourceId = v ?? ''),
-      ),
+    return _SourcePicker(
+      sources: store.sources,
+      selected: _sourceId,
+      hint: 'اختر جهة...',
+      sourceLabel: (s) => store.sourcePath(s.id),
+      onSelected: (id) => setState(() => _sourceId = id),
     );
   }
 }
@@ -1710,6 +1720,309 @@ class _PolicyFormDialogState extends State<PolicyFormDialog> {
         ],
       ),
     );
+  }
+}
+
+// ── PERSON NAV TILE ────────────────────────────────────
+class _PersonNavTile extends StatelessWidget {
+  final Person person;
+  final bool active;
+  final VoidCallback onTap, onEdit;
+  const _PersonNavTile({required this.person, required this.active, required this.onTap, required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          margin: const EdgeInsets.only(bottom: 2, right: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? _followup.withValues(alpha: .14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(Icons.person_outline, size: 14, color: active ? _followup : _muted),
+            const SizedBox(width: 7),
+            Expanded(child: Text(person.name, style: TextStyle(fontSize: 12.5, color: active ? _followup : _muted, fontWeight: active ? FontWeight.w500 : FontWeight.normal), overflow: TextOverflow.ellipsis)),
+            GestureDetector(
+              onTap: onEdit,
+              child: const Icon(Icons.edit_outlined, size: 13, color: _muted),
+            ),
+          ]),
+        ),
+      );
+}
+
+// ── PERSON FORM DIALOG ─────────────────────────────────
+class _PersonFormDialog extends StatefulWidget {
+  final Person person;
+  const _PersonFormDialog({required this.person});
+  @override State<_PersonFormDialog> createState() => _PersonFormDialogState();
+}
+
+class _PersonFormDialogState extends State<_PersonFormDialog> {
+  late TextEditingController _name, _role;
+  bool _isNew = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isNew = widget.person.name.isEmpty;
+    _name = TextEditingController(text: widget.person.name);
+    _role = TextEditingController(text: widget.person.role);
+  }
+
+  @override
+  void dispose() { _name.dispose(); _role.dispose(); super.dispose(); }
+
+  InputDecoration _dec(String hint) => InputDecoration(
+    hintText: hint, hintStyle: const TextStyle(color: _muted),
+    filled: true, fillColor: _surface2,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _accent)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<AppStore>();
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(_isNew ? 'إضافة شخص' : 'تعديل الشخص', style: const TextStyle(fontSize: 16, color: _text, fontWeight: FontWeight.w600)),
+        content: SizedBox(width: 340, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('الاسم *', style: TextStyle(fontSize: 12.5, color: _muted, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 5),
+          TextField(controller: _name, textDirection: TextDirection.rtl, style: const TextStyle(fontSize: 13.5, color: _text), decoration: _dec('مثال: أحمد محمد')),
+          const SizedBox(height: 12),
+          const Text('الدور / الوصف', style: TextStyle(fontSize: 12.5, color: _muted, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 5),
+          TextField(controller: _role, textDirection: TextDirection.rtl, style: const TextStyle(fontSize: 13.5, color: _text), decoration: _dec('مثال: مدير المشروع')),
+        ])),
+        actions: [
+          if (!_isNew)
+            TextButton(
+              onPressed: () async {
+                final ok = await showDialog<bool>(context: context, builder: (_) => _ConfirmDlg(title: 'حذف', msg: 'حذف "${widget.person.name}"؟'));
+                if (ok == true && context.mounted) { store.deletePerson(widget.person.id); Navigator.pop(context); }
+              },
+              child: const Text('حذف', style: TextStyle(color: _critical)),
+            ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء', style: TextStyle(color: _muted))),
+          ElevatedButton(
+            onPressed: () {
+              final name = _name.text.trim();
+              if (name.isEmpty) return;
+              final p = Person(id: widget.person.id, name: name, role: _role.text.trim());
+              if (_isNew) store.addPerson(p);
+              else store.updatePerson(p);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: _accent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── SEARCHABLE PERSON PICKER ───────────────────────────
+class _PersonPicker extends StatefulWidget {
+  final List<Person> people;
+  final String selected; // name
+  final String hint;
+  final bool allowClear;
+  final void Function(String name) onSelected;
+  final void Function(String name)? onSubmitted;
+  const _PersonPicker({required this.people, required this.selected, required this.hint, required this.onSelected, this.onSubmitted, this.allowClear = true});
+  @override State<_PersonPicker> createState() => _PersonPickerState();
+}
+
+class _PersonPickerState extends State<_PersonPicker> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  bool _open = false;
+  List<Person> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.people;
+    _ctrl.text = widget.selected;
+    _focus.addListener(() { if (!_focus.hasFocus) setState(() => _open = false); });
+  }
+
+  @override
+  void didUpdateWidget(covariant _PersonPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      _ctrl.text = widget.selected;
+    }
+    if (oldWidget.people != widget.people) {
+      _filtered = widget.people;
+    }
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); _focus.dispose(); super.dispose(); }
+
+  void _filter(String q) {
+    setState(() {
+      _filtered = widget.people.where((p) => p.name.toLowerCase().contains(q.toLowerCase())).toList();
+      _open = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: _ctrl,
+        focusNode: _focus,
+        textDirection: TextDirection.rtl,
+        style: const TextStyle(fontSize: 13.5, color: _text),
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          hintStyle: const TextStyle(color: _muted),
+          filled: true, fillColor: _surface2,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _accent)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+          suffixIcon: widget.selected.isNotEmpty && widget.allowClear
+              ? IconButton(icon: const Icon(Icons.close, size: 16, color: _muted), onPressed: () { _ctrl.clear(); widget.onSelected(''); setState(() => _open = false); })
+              : const Icon(Icons.keyboard_arrow_down, size: 18, color: _muted),
+        ),
+        onTap: () { setState(() { _filtered = widget.people; _open = true; }); },
+        onChanged: _filter,
+        onSubmitted: (value) {
+          widget.onSubmitted?.call(value);
+          setState(() => _open = false);
+          _focus.unfocus();
+        },
+      ),
+      if (_open && _filtered.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(top: 2),
+          constraints: const BoxConstraints(maxHeight: 180),
+          decoration: BoxDecoration(color: _surface2, border: Border.all(color: _border), borderRadius: BorderRadius.circular(8)),
+          child: ListView(shrinkWrap: true, children: _filtered.map((p) => InkWell(
+            onTap: () { _ctrl.text = p.name; widget.onSelected(p.name); setState(() => _open = false); _focus.unfocus(); },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(p.name, style: const TextStyle(fontSize: 13, color: _text)),
+                if (p.role.isNotEmpty) Text(p.role, style: const TextStyle(fontSize: 11, color: _muted)),
+              ]),
+            ),
+          )).toList()),
+        ),
+    ]);
+  }
+}
+
+// ── SEARCHABLE SOURCE PICKER ─────────────────────────
+class _SourcePicker extends StatefulWidget {
+  final List<Source> sources;
+  final String selected;
+  final String hint;
+  final String Function(Source source) sourceLabel;
+  final void Function(String id) onSelected;
+  const _SourcePicker({required this.sources, required this.selected, required this.hint, required this.sourceLabel, required this.onSelected});
+  @override State<_SourcePicker> createState() => _SourcePickerState();
+}
+
+class _SourcePickerState extends State<_SourcePicker> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  bool _open = false;
+  List<Source> _filtered = [];
+  Source? _selectedSource;
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.sources;
+    final matches = widget.sources.where((s) => s.id == widget.selected);
+    _selectedSource = matches.isNotEmpty ? matches.first : null;
+    _ctrl.text = _selectedSource != null ? widget.sourceLabel(_selectedSource!) : '';
+    _focus.addListener(() {
+      if (!_focus.hasFocus) setState(() => _open = false);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _SourcePicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected || oldWidget.sources != widget.sources) {
+      final matches = widget.sources.where((s) => s.id == widget.selected);
+      _selectedSource = matches.isNotEmpty ? matches.first : null;
+      _ctrl.text = _selectedSource != null ? widget.sourceLabel(_selectedSource!) : '';
+      _filtered = widget.sources;
+    }
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); _focus.dispose(); super.dispose(); }
+
+  void _filter(String q) {
+    setState(() {
+      final lower = q.toLowerCase();
+      _filtered = widget.sources.where((s) => widget.sourceLabel(s).toLowerCase().contains(lower)).toList();
+      _open = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: _ctrl,
+        focusNode: _focus,
+        textDirection: TextDirection.rtl,
+        style: const TextStyle(fontSize: 13.5, color: _text),
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          hintStyle: const TextStyle(color: _muted),
+          filled: true, fillColor: _surface2,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: _accent)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+          suffixIcon: widget.selected.isNotEmpty
+              ? IconButton(icon: const Icon(Icons.close, size: 16, color: _muted), onPressed: () { _ctrl.clear(); widget.onSelected(''); setState(() => _open = false); })
+              : const Icon(Icons.keyboard_arrow_down, size: 18, color: _muted),
+        ),
+        onTap: () { setState(() { _filtered = widget.sources; _open = true; }); },
+        onChanged: _filter,
+      ),
+      if (_open && _filtered.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(top: 2),
+          constraints: const BoxConstraints(maxHeight: 220),
+          decoration: BoxDecoration(color: _surface2, border: Border.all(color: _border), borderRadius: BorderRadius.circular(8)),
+          child: ListView(shrinkWrap: true, children: _filtered.map((s) {
+            final label = widget.sourceLabel(s);
+            return InkWell(
+              onTap: () {
+                _ctrl.text = label;
+                widget.onSelected(s.id);
+                setState(() => _open = false);
+                _focus.unfocus();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Text(label, style: const TextStyle(fontSize: 13, color: _text)),
+              ),
+            );
+          }).toList()),
+        ),
+    ]);
   }
 }
 

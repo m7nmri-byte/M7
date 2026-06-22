@@ -1,5 +1,18 @@
 import 'dart:convert';
 
+class Person {
+  final String id;
+  String name;
+  String role;
+
+  Person({required this.id, required this.name, this.role = ''});
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'role': role};
+
+  factory Person.fromJson(Map<String, dynamic> j) =>
+      Person(id: j['id'] ?? '', name: j['name'] ?? '', role: j['role'] ?? '');
+}
+
 class Task {
   final String id;
   String title;
