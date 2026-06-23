@@ -202,7 +202,7 @@ class AppStore extends ChangeNotifier {
     final uniqueNames = names.map((n) => n.trim()).where((n) => n.isNotEmpty).toSet();
     for (final name in uniqueNames) {
       if (personByName(name) == null) {
-        final p = Person(id: _uid(), name: name);
+        final p = Person(id: _uid(), name: name, icon: '', color: '#bc8cff');
         await _db.collection('people').doc(p.id).set(p.toJson()..remove('id'));
         people.add(p);
       }
@@ -217,7 +217,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Person buildNewPerson() => Person(id: _uid(), name: '');
+  Person buildNewPerson() => Person(id: _uid(), name: '', icon: '', color: '#bc8cff');
 
   List<String> allPeopleNames() {
     final fromPeople = people.map((p) => p.name).toSet();

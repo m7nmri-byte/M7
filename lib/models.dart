@@ -4,13 +4,21 @@ class Person {
   final String id;
   String name;
   String role;
+  String icon; // emoji or initials
+  String color; // hex color
 
-  Person({required this.id, required this.name, this.role = ''});
+  Person({required this.id, required this.name, this.role = '', this.icon = '', this.color = '#bc8cff'});
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'role': role};
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'role': role, 'icon': icon, 'color': color};
 
   factory Person.fromJson(Map<String, dynamic> j) =>
-      Person(id: j['id'] ?? '', name: j['name'] ?? '', role: j['role'] ?? '');
+      Person(
+        id: j['id'] ?? '',
+        name: j['name'] ?? '',
+        role: j['role'] ?? '',
+        icon: j['icon'] ?? '',
+        color: j['color'] ?? '#bc8cff',
+      );
 }
 
 class Task {

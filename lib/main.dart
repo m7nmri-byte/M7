@@ -1401,14 +1401,25 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _fLabel('المنفذ (فارغ = أنا)'),
-                _PersonPicker(
-                  people: store.people,
-                  selected: _assigned.text,
-                  hint: 'اختر منفذ المهمة أو اكتب اسماً جديداً',
-                  allowClear: true,
-                  onSelected: (name) => setState(() => _assigned.text = name),
-                  onSubmitted: (name) => setState(() => _assigned.text = name),
-                ),
+                Row(children: [
+                  Expanded(child: _PersonPicker(
+                    people: store.people,
+                    selected: _assigned.text,
+                    hint: 'اختر منفذ المهمة أو اكتب اسماً جديداً',
+                    allowClear: true,
+                    onSelected: (name) => setState(() => _assigned.text = name),
+                    onSubmitted: (name) => setState(() => _assigned.text = name),
+                  )),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () async {
+                      final p = await showDialog<Person?>(context: context, builder: (_) => _PersonFormDialog(person: store.buildNewPerson()));
+                      if (p != null) setState(() => _assigned.text = p.name);
+                    },
+                    icon: const Icon(Icons.add, size: 20, color: Colors.white),
+                    tooltip: 'أضف شخص جديد',
+                  ),
+                ]),
               ])),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1421,30 +1432,41 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
             _fLabel('المتعاونون'),
             Row(children: [
               Expanded(
-                child: _PersonPicker(
-                  people: store.people,
-                  selected: _collabSelected,
-                  hint: 'اختر متعاوناً أو اكتب اسماً جديداً',
-                  allowClear: false,
-                  onSelected: (name) {
-                    final n = name.trim();
-                    if (n.isNotEmpty && !_collabs.contains(n)) {
-                      setState(() {
-                        _collabs.add(n);
-                        _collabSelected = '';
-                      });
-                    }
-                  },
-                  onSubmitted: (name) {
-                    final n = name.trim();
-                    if (n.isNotEmpty && !_collabs.contains(n)) {
-                      setState(() {
-                        _collabs.add(n);
-                        _collabSelected = '';
-                      });
-                    }
-                  },
-                ),
+                child: Row(children: [
+                  Expanded(child: _PersonPicker(
+                    people: store.people,
+                    selected: _collabSelected,
+                    hint: 'اختر متعاوناً أو اكتب اسماً جديداً',
+                    allowClear: false,
+                    onSelected: (name) {
+                      final n = name.trim();
+                      if (n.isNotEmpty && !_collabs.contains(n)) {
+                        setState(() {
+                          _collabs.add(n);
+                          _collabSelected = '';
+                        });
+                      }
+                    },
+                    onSubmitted: (name) {
+                      final n = name.trim();
+                      if (n.isNotEmpty && !_collabs.contains(n)) {
+                        setState(() {
+                          _collabs.add(n);
+                          _collabSelected = '';
+                        });
+                      }
+                    },
+                  )),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () async {
+                      final p = await showDialog<Person?>(context: context, builder: (_) => _PersonFormDialog(person: store.buildNewPerson()));
+                      if (p != null && !_collabs.contains(p.name)) setState(() => _collabs.add(p.name));
+                    },
+                    icon: const Icon(Icons.add, size: 20, color: Colors.white),
+                    tooltip: 'أضف شخص جديد',
+                  ),
+                ]),
               ),
             ]),
             if (_collabs.isNotEmpty)
@@ -1521,13 +1543,24 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
       }));
 
   Widget _buildSourceDd(AppStore store) {
-    return _SourcePicker(
-      sources: store.sources,
-      selected: _sourceId,
-      hint: 'اختر جهة...',
-      sourceLabel: (s) => store.sourcePath(s.id),
-      onSelected: (id) => setState(() => _sourceId = id),
-    );
+    return Row(children: [
+      Expanded(child: _SourcePicker(
+        sources: store.sources,
+        selected: _sourceId,
+        hint: 'اختر جهة...',
+        sourceLabel: (s) => store.sourcePath(s.id),
+        onSelected: (id) => setState(() => _sourceId = id),
+      )),
+      const SizedBox(width: 8),
+      IconButton(
+        onPressed: () async {
+          final s = await showDialog<Source?>(context: context, builder: (_) => SourceFormDialog(source: store.buildNewSource()));
+          if (s != null) setState(() => _sourceId = s.id);
+        },
+        icon: const Icon(Icons.add, size: 20, color: Colors.white),
+        tooltip: 'أضف جهة جديدة',
+      ),
+    ]);
   }
 }
 
@@ -1612,7 +1645,7 @@ class _SourceFormDialogState extends State<SourceFormDialog> {
               final s = Source(id: widget.source.id, name: name, color: _color, parentId: _parentId);
               if (_isNew) store.addSource(s);
               else store.updateSource(s);
-              Navigator.pop(context);
+              Navigator.pop(context, s);
             },
             style: ElevatedButton.styleFrom(backgroundColor: _accent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             child: const Text('حفظ'),
@@ -1742,7 +1775,18 @@ class _PersonNavTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(children: [
-            Icon(Icons.person_outline, size: 14, color: active ? _followup : _muted),
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(color: hexColor(person.color), shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: person.icon.isNotEmpty
+                  ? Text(person.icon, style: const TextStyle(fontSize: 14))
+                  : Text(
+                      person.name.isNotEmpty ? person.name.trim().split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join() : '',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                    ),
+            ),
             const SizedBox(width: 7),
             Expanded(child: Text(person.name, style: TextStyle(fontSize: 12.5, color: active ? _followup : _muted, fontWeight: active ? FontWeight.w500 : FontWeight.normal), overflow: TextOverflow.ellipsis)),
             GestureDetector(
@@ -1763,7 +1807,9 @@ class _PersonFormDialog extends StatefulWidget {
 
 class _PersonFormDialogState extends State<_PersonFormDialog> {
   late TextEditingController _name, _role;
+  late TextEditingController _icon;
   bool _isNew = false;
+  String _color = '#bc8cff';
 
   @override
   void initState() {
@@ -1771,10 +1817,12 @@ class _PersonFormDialogState extends State<_PersonFormDialog> {
     _isNew = widget.person.name.isEmpty;
     _name = TextEditingController(text: widget.person.name);
     _role = TextEditingController(text: widget.person.role);
+    _icon = TextEditingController(text: widget.person.icon);
+    _color = widget.person.color.isNotEmpty ? widget.person.color : '#bc8cff';
   }
 
   @override
-  void dispose() { _name.dispose(); _role.dispose(); super.dispose(); }
+  void dispose() { _name.dispose(); _role.dispose(); _icon.dispose(); super.dispose(); }
 
   InputDecoration _dec(String hint) => InputDecoration(
     hintText: hint, hintStyle: const TextStyle(color: _muted),
@@ -1802,13 +1850,29 @@ class _PersonFormDialogState extends State<_PersonFormDialog> {
           const Text('الدور / الوصف', style: TextStyle(fontSize: 12.5, color: _muted, fontWeight: FontWeight.w500)),
           const SizedBox(height: 5),
           TextField(controller: _role, textDirection: TextDirection.rtl, style: const TextStyle(fontSize: 13.5, color: _text), decoration: _dec('مثال: مدير المشروع')),
+          const SizedBox(height: 12),
+          const Text('أيقونة (إيموجي أو حرفين)', style: TextStyle(fontSize: 12.5, color: _muted, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 5),
+          TextField(controller: _icon, textDirection: TextDirection.rtl, style: const TextStyle(fontSize: 16, color: _text), decoration: _dec('مثال: 👩‍💻 أو أ م')),
+          const SizedBox(height: 12),
+          const Text('لون الاختصار', style: TextStyle(fontSize: 12.5, color: _muted, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: _srcColors.map((c) => GestureDetector(
+              onTap: () => setState(() => _color = c),
+              child: Container(
+                width: 28, height: 28, decoration: BoxDecoration(color: hexColor(c), shape: BoxShape.circle, border: Border.all(color: _color == c ? _accent : Colors.transparent, width: 2)),
+              ),
+            )).toList(),
+          ),
         ])),
         actions: [
           if (!_isNew)
             TextButton(
               onPressed: () async {
                 final ok = await showDialog<bool>(context: context, builder: (_) => _ConfirmDlg(title: 'حذف', msg: 'حذف "${widget.person.name}"؟'));
-                if (ok == true && context.mounted) { store.deletePerson(widget.person.id); Navigator.pop(context); }
+                if (ok == true && context.mounted) { await store.deletePerson(widget.person.id); Navigator.pop(context); }
               },
               child: const Text('حذف', style: TextStyle(color: _critical)),
             ),
@@ -1817,10 +1881,10 @@ class _PersonFormDialogState extends State<_PersonFormDialog> {
             onPressed: () {
               final name = _name.text.trim();
               if (name.isEmpty) return;
-              final p = Person(id: widget.person.id, name: name, role: _role.text.trim());
-              if (_isNew) store.addPerson(p);
-              else store.updatePerson(p);
-              Navigator.pop(context);
+              final p = Person(id: widget.person.id, name: name, role: _role.text.trim(), icon: _icon.text.trim(), color: _color);
+              if (_isNew) await store.addPerson(p);
+              else await store.updatePerson(p);
+              Navigator.pop(context, p);
             },
             style: ElevatedButton.styleFrom(backgroundColor: _accent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             child: const Text('حفظ'),
@@ -1915,9 +1979,19 @@ class _PersonPickerState extends State<_PersonPicker> {
             onTap: () { _ctrl.text = p.name; widget.onSelected(p.name); setState(() => _open = false); _focus.unfocus(); },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(p.name, style: const TextStyle(fontSize: 13, color: _text)),
-                if (p.role.isNotEmpty) Text(p.role, style: const TextStyle(fontSize: 11, color: _muted)),
+              child: Row(children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(color: hexColor(p.color), shape: BoxShape.circle),
+                  alignment: Alignment.center,
+                  child: p.icon.isNotEmpty ? Text(p.icon, style: const TextStyle(fontSize: 16)) : Text(p.name.trim().isNotEmpty ? p.name.trim().split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join() : '', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(p.name, style: const TextStyle(fontSize: 13, color: _text)),
+                  if (p.role.isNotEmpty) Text(p.role, style: const TextStyle(fontSize: 11, color: _muted)),
+                ])),
               ]),
             ),
           )).toList()),
