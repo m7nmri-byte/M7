@@ -1878,7 +1878,7 @@ class _PersonFormDialogState extends State<_PersonFormDialog> {
             ),
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء', style: TextStyle(color: _muted))),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final name = _name.text.trim();
               if (name.isEmpty) return;
               final p = Person(id: widget.person.id, name: name, role: _role.text.trim(), icon: _icon.text.trim(), color: _color);
@@ -1976,7 +1976,12 @@ class _PersonPickerState extends State<_PersonPicker> {
           constraints: const BoxConstraints(maxHeight: 180),
           decoration: BoxDecoration(color: _surface2, border: Border.all(color: _border), borderRadius: BorderRadius.circular(8)),
           child: ListView(shrinkWrap: true, children: _filtered.map((p) => InkWell(
-            onTap: () { _ctrl.text = p.name; widget.onSelected(p.name); setState(() => _open = false); _focus.unfocus(); },
+            onTap: () {
+              _ctrl.text = p.name;
+              setState(() => _open = false);
+              _focus.unfocus();
+              widget.onSelected(p.name);
+            },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               child: Row(children: [
