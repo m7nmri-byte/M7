@@ -1405,6 +1405,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                   Expanded(child: _PersonPicker(
                     people: store.people,
                     selected: _assigned.text,
+                    controller: _assigned,
                     hint: 'اختر منفذ المهمة أو اكتب اسماً جديداً',
                     allowClear: true,
                     onSelected: (name) => setState(() => _assigned.text = name),
@@ -1436,6 +1437,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                   Expanded(child: _PersonPicker(
                     people: store.people,
                     selected: _collabSelected,
+                    controller: _collabCtrl,
                     hint: 'اختر متعاوناً أو اكتب اسماً جديداً',
                     allowClear: false,
                     onSelected: (name) {
@@ -1444,6 +1446,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                         setState(() {
                           _collabs.add(n);
                           _collabSelected = '';
+                          _collabCtrl.clear();
                         });
                       }
                     },
@@ -1453,6 +1456,7 @@ class _TaskFormDialogState extends State<TaskFormDialog> {
                         setState(() {
                           _collabs.add(n);
                           _collabSelected = '';
+                          _collabCtrl.clear();
                         });
                       }
                     },
@@ -1903,12 +1907,13 @@ class _PersonPicker extends StatefulWidget {
   final bool allowClear;
   final void Function(String name) onSelected;
   final void Function(String name)? onSubmitted;
-  const _PersonPicker({required this.people, required this.selected, required this.hint, required this.onSelected, this.onSubmitted, this.allowClear = true});
+  final TextEditingController? controller;
+  const _PersonPicker({required this.people, required this.selected, required this.hint, required this.onSelected, this.onSubmitted, this.allowClear = true, this.controller});
   @override State<_PersonPicker> createState() => _PersonPickerState();
 }
 
 class _PersonPickerState extends State<_PersonPicker> {
-  final _ctrl = TextEditingController();
+  late final TextEditingController _ctrl;
   final _focus = FocusNode();
   bool _open = false;
   List<Person> _filtered = [];
@@ -1917,6 +1922,7 @@ class _PersonPickerState extends State<_PersonPicker> {
   void initState() {
     super.initState();
     _filtered = widget.people;
+    _ctrl = widget.controller ?? TextEditingController();
     _ctrl.text = widget.selected;
     _focus.addListener(() { if (!_focus.hasFocus) setState(() => _open = false); });
   }
@@ -1925,6 +1931,7 @@ class _PersonPickerState extends State<_PersonPicker> {
   void didUpdateWidget(covariant _PersonPicker oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selected != widget.selected) {
+      // if using external controller, update it too
       _ctrl.text = widget.selected;
     }
     if (oldWidget.people != widget.people) {
@@ -1933,7 +1940,7 @@ class _PersonPickerState extends State<_PersonPicker> {
   }
 
   @override
-  void dispose() { _ctrl.dispose(); _focus.dispose(); super.dispose(); }
+  void dispose() { if (widget.controller == null) _ctrl.dispose(); _focus.dispose(); super.dispose(); }
 
   void _filter(String q) {
     setState(() {
